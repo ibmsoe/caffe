@@ -7,6 +7,9 @@
 # CPU-only switch (uncomment to build without GPU support).
 # CPU_ONLY := 1
 
+# MASS switch (uncomment to build with IBM Mathematical Acceleration Subsystem)
+# USE_MASS := 1
+
 # uncomment to disable IO dependencies and corresponding data layers
 # USE_OPENCV := 0
 # USE_LEVELDB := 0
@@ -62,6 +65,9 @@ BLAS := atlas
 # MATLAB directory should contain the mex binary in /bin.
 # MATLAB_DIR := /usr/local
 # MATLAB_DIR := /Applications/MATLAB_R2012b.app
+
+# MASS lib directories
+# MASS_LIB := /path/to/your/MASS
 
 # NOTE: this is required only if you will compile the python interface.
 # We need to be able to find Python.h and numpy/arrayobject.h.
