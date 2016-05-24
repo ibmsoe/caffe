@@ -336,10 +336,10 @@ endif
 
 # MASS configuration.
 ifeq ($(USE_MASS), 1)
-       LIBRARIES = mass massvp8 mass_simdp8
-       COMMON_FLAGS = -DUSE_MASS
-       CXXFLAGS = -mveclibabi=mass -ftree-vectorize -funsafe-math-optimizations
-       LIBRARY_DIRS = $(MASS_LIB)
+       LIBRARIES += mass massvp8 mass_simdp8
+       COMMON_FLAGS += -DUSE_MASS
+       CXXFLAGS += -mveclibabi=mass -ftree-vectorize -funsafe-math-optimizations
+       LIBRARY_DIRS += $(MASS_LIB)
 endif
 
 # configure IO libraries
