@@ -45,6 +45,13 @@ CUDA_ARCH := -gencode arch=compute_20,code=sm_20 \
 		-gencode arch=compute_50,code=sm_50 \
 		-gencode arch=compute_50,code=compute_50
 
+#Check if CUDA_VERSION is late enough to support *_60.
+CUDA_VERSION := $(shell $(CUDA_DIR)/bin/nvcc -V | grep -o 'release [0-9.]*' | tr -d '[a-z ]')
+
+     ifeq ($(shell awk 'END {exit $(CUDA_VERSION) >= 8.0}' /dev/null; echo $$?), 1)
+                        CUDA_ARCH += -gencode arch=compute_60,code=sm_60
+     endif
+
 # BLAS choice:
 # atlas for ATLAS (default)
 # mkl for MKL
