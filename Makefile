@@ -332,6 +332,8 @@ endif
 ifeq ($(USE_NCCL), 1)
 	LIBRARIES += nccl
 	COMMON_FLAGS += -DUSE_NCCL
+        INCLUDE_DIRS += $(NCCL_INCLUDE)
+        LIBRARY_DIRS += $(NCCL_LIB)
 endif
 
 # MASS configuration.
