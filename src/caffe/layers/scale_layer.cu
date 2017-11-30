@@ -38,6 +38,9 @@ void ScaleLayer<Dtype>::Forward_gpu(
     // we'll need to do Backward at the time of the Forward call.
     caffe_copy(bottom[0]->count(), bottom[0]->gpu_data(),
                temp_.mutable_gpu_data());
+
+    //LMS by Minsik : temp_ is valid only for in-place computation
+    temp_.data()->push_to_cpu(false);  //can be read in backprop
   }
   const Dtype* scale_data =
       ((bottom.size() > 1) ? bottom[1] : this->blobs_[0].get())->gpu_data();
@@ -128,6 +131,12 @@ void ScaleLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
         <<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, top_diff, scale_data, scale_dim_, inner_dim_, bottom_diff);
   }
+   
+  //LMS by Minsik
+  sum_multiplier_.data()->push_to_cpu(false); //make sure it comes from CPU next time
+  sum_result_.data()->push_to_cpu(true);
+  if(bottom[0] == top[0])//only if in-place
+    temp_.data()->push_to_cpu(true);  
 }
 
 INSTANTIATE_LAYER_GPU_FUNCS(ScaleLayer);

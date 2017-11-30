@@ -26,6 +26,11 @@ using caffe::Timer;
 using caffe::vector;
 using std::ostringstream;
 
+//LMCS
+//defined in syncedmem.cpp                     
+DECLARE_int32(lms);   //any memory larger than this in KB will be managed as large-model support
+DECLARE_double(lms_frac); //fraction of total memory before activating large-model support
+
 DEFINE_string(gpu, "",
     "Optional; run in GPU mode on given device IDs separated by ','."
     "Use '-gpu all' to run on all available GPUs. The effective training "
@@ -382,21 +387,25 @@ int time() {
   std::vector<double> backward_time_per_layer(layers.size(), 0.0);
   double forward_time = 0.0;
   double backward_time = 0.0;
+
+  bool lms_on = FLAGS_lms >= 0;
+
   for (int j = 0; j < FLAGS_iterations; ++j) {
     Timer iter_timer;
     iter_timer.Start();
     forward_timer.Start();
     for (int i = 0; i < layers.size(); ++i) {
       timer.Start();
-      layers[i]->Forward(bottom_vecs[i], top_vecs[i]);
+      if (lms_on)  caffe_net.ForwardFromTo(i, i); //Minsik: LMS available in net only
+      else         layers[i]->Forward(bottom_vecs[i], top_vecs[i]);
       forward_time_per_layer[i] += timer.MicroSeconds();
     }
     forward_time += forward_timer.MicroSeconds();
     backward_timer.Start();
     for (int i = layers.size() - 1; i >= 0; --i) {
       timer.Start();
-      layers[i]->Backward(top_vecs[i], bottom_need_backward[i],
-                          bottom_vecs[i]);
+      if (lms_on) caffe_net.BackwardFromTo(i, i);
+      else        layers[i]->Backward(top_vecs[i], bottom_need_backward[i], bottom_vecs[i]);
       backward_time_per_layer[i] += timer.MicroSeconds();
     }
     backward_time += backward_timer.MicroSeconds();

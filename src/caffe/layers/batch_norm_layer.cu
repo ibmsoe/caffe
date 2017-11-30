@@ -87,6 +87,17 @@ void BatchNormLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
   //                 might clobber the data.  Can we skip this if they won't?
   caffe_copy(x_norm_.count(), top_data,
       x_norm_.mutable_gpu_data());
+      
+      
+  //LMS by Minsik
+  batch_sum_multiplier_.data()->push_to_cpu(false);  //read_only, so no copy
+  spatial_sum_multiplier_.data()->push_to_cpu(false); //read only, so no copy
+  num_by_chans_.data()->push_to_cpu(true);  //no resue in backprop  
+  
+  mean_.data()->push_to_cpu(true);  //no reuse in backprop
+  variance_.data()->push_to_cpu(true); //only in forwardprop
+  temp_.data()->push_to_cpu(false); //need to keep as reused in backprop
+  x_norm_.data()->push_to_cpu(false); //need to keep as reused in backprop
 }
 
 template <typename Dtype>
@@ -163,6 +174,18 @@ void BatchNormLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
   // note: temp_ still contains sqrt(var(X)+eps), computed during the forward
   // pass.
   caffe_gpu_div(temp_.count(), bottom_diff, temp_.gpu_data(), bottom_diff);
+  
+  //LMS by Minsik
+  batch_sum_multiplier_.data()->push_to_cpu(false);   //make sure it comes from CPU next time
+  spatial_sum_multiplier_.data()->push_to_cpu(false); //make sure it comes from CPU next time
+
+  num_by_chans_.data()->push_to_cpu(true);
+  
+  mean_.data()->push_to_cpu(true);
+  //variance_.data()->push_to_cpu(true); not used here
+  temp_.data()->push_to_cpu(true);
+  x_norm_.data()->push_to_cpu(true); 
+  x_norm_.diff()->push_to_cpu(true); 
 }
 
 INSTANTIATE_LAYER_GPU_FUNCS(BatchNormLayer);
