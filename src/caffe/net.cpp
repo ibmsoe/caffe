@@ -17,6 +17,9 @@
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 
+//defined in syncedmem.cpp
+DECLARE_int32(lms);
+
 namespace caffe {
 
 template <typename Dtype>
@@ -253,7 +256,210 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   ShareWeights();
   debug_info_ = param.debug_info();
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
+
+  BuildLargeModelSupport();
 }
+
+
+template <typename Dtype>
+void Net<Dtype>::BuildLargeModelSupport() {
+
+  bool lms_on = FLAGS_lms >= 0;
+
+  if (!lms_on)
+    return;
+
+  LOG_IF(INFO, Caffe::root_solver()) << "[LMS] " << __FUNCTION__;
+
+  _lms_layer_flag.resize(layers_.size() + 1, 0);
+
+  int last_layer = layers_.size() - 1;
+  for (int i = 0; i <= last_layer; ++i) {
+
+    _lms_layer_flag[i] = (bottom_vecs_[i].size() == 1 && top_vecs_[i].size() == 1 &&
+      bottom_vecs_[i].front()->data() == top_vecs_[i].front()->data() &&
+      bottom_vecs_[i].front()->diff() == top_vecs_[i].front()->diff());
+
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+
+      typename  map<void*, pair<int, int> >::iterator itr_data = _forward_data_range.find(cur_blob->data().get());
+      if (itr_data == _forward_data_range.end())
+        _forward_data_range.insert(make_pair(cur_blob->data().get(), make_pair(INT_MAX, 0)));
+
+      itr_data = _forward_data_range.find(cur_blob->data().get());
+      itr_data->second.first = std::min(itr_data->second.first, i);
+      itr_data->second.second = std::max(itr_data->second.second, i);
+    }
+  }
+
+  for (int i = last_layer; i >= 0; --i) {
+
+    //get layer type
+    const char* layer_type = layers_[i]->type();
+
+    bool discard_data = true;
+    bool discard_diff = true;
+
+    if (
+      !strcmp(layer_type, "Convolution") ||
+      !strcmp(layer_type, "InnerProduct") ||
+      !strcmp(layer_type, "SoftmaxWithLoss") ||
+      !strcmp(layer_type, "Pooling") ||
+      !strcmp(layer_type, "ReLU") ||
+      !strcmp(layer_type, "Split") ||
+      !strcmp(layer_type, "Accuracy") ||
+      !strcmp(layer_type, "Concat") ||
+      !strcmp(layer_type, "Dropout") ||
+      !strcmp(layer_type, "LRN") ||
+      !strcmp(layer_type, "Scale") ||
+      !strcmp(layer_type, "Eltwise") ||
+      !strcmp(layer_type, "BatchNorm") ||
+      !strcmp(layer_type, "Data")) {
+    }
+    else {
+      discard_data = false;
+      discard_diff = false;
+
+      LOG(WARNING) << "[LMS] ###################################################### ";
+      LOG(WARNING) << "[LMS] uncovered layer type: " << layer_type;
+      LOG(WARNING) << "[LMS] ###################################################### ";
+    }
+
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+
+      typename  map<void*, bool> ::iterator itr_discard_data = _discard_mem.find(cur_blob->data().get());
+      if (itr_discard_data == _discard_mem.end())
+        _discard_mem.insert(make_pair(cur_blob->data().get(), true));
+
+      _discard_mem[cur_blob->data().get()] &= discard_data;
+
+      typename  map<void*, bool> ::iterator itr_discard_diff = _discard_mem.find(cur_blob->diff().get());
+      if (itr_discard_diff == _discard_mem.end())
+        _discard_mem.insert(make_pair(cur_blob->diff().get(), true));
+
+      _discard_mem[cur_blob->diff().get()] &= discard_diff;
+    }
+
+
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+
+      typename  map<void*, pair<int, int> >::iterator itr_data = _backward_data_range.find(cur_blob->data().get());
+      if (itr_data == _backward_data_range.end())
+        _backward_data_range.insert(make_pair(cur_blob->data().get(), make_pair(INT_MAX, 0)));
+
+      itr_data = _backward_data_range.find(cur_blob->data().get());
+      itr_data->second.first = std::min(itr_data->second.first, i);
+      itr_data->second.second = std::max(itr_data->second.second, i);
+
+      typename  map<void*, pair<int, int> >::iterator itr_diff = _backward_diff_range.find(cur_blob->diff().get());
+      if (itr_diff == _backward_diff_range.end())
+        _backward_diff_range.insert(make_pair(cur_blob->diff().get(), make_pair(INT_MAX, 0)));
+
+      itr_diff = _backward_diff_range.find(cur_blob->diff().get());
+      itr_diff->second.first = std::min(itr_diff->second.first, i);
+      itr_diff->second.second = std::max(itr_diff->second.second, i);
+    }
+  }
+
+  if (!Caffe::root_solver()) return;
+
+  for (int i = 0; i <= last_layer; ++i) {
+
+    std::stringstream ss;
+
+    ss << "data: ";
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+      ss << cur_blob->data().get()
+        << "(" << cur_blob->data()->size() << ")"
+        << " ";
+    }
+
+    ss << " -> data: ";
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+      ss << cur_blob->data().get()
+        << "(" << cur_blob->data()->size() << ")"
+        << " ";
+    }
+
+    ss << " ### ";
+    ss << "flag=" << _lms_layer_flag[i];
+    ss << "   ";
+
+    ss << "data: ";
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+
+      pair<int, int> range = _forward_data_range[cur_blob->data().get()];
+      ss << cur_blob->data().get() << "(" << range.first << "," << range.second << ")  ";
+    }
+
+    LOG(INFO) << "[LMS] " << layer_names_[i] << "_forward [" << i << "] " << ss.str();
+  }
+
+
+  for (int i = last_layer; i >= 0; --i) {
+
+    const char* layer_type = layers_[i]->type();
+
+    std::stringstream ss;
+
+    ss << "data: ";
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+      ss << cur_blob->data().get()
+        << "(" << cur_blob->data()->size() << ")"
+        << " ";
+    }
+
+    ss << "diff: ";
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+      ss << cur_blob->diff().get()
+        << "(" << cur_blob->diff()->size() << ")"
+        << " ";
+    }
+
+    ss << " -> data: ";
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+      ss << cur_blob->data().get() << " ";
+    }
+
+    ss << "diff: ";
+    for (int id = 0; id < bottom_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+      ss << cur_blob->diff().get() << " ";
+    }
+
+    ss << " ### ";
+    ss << "flag=" << _lms_layer_flag[i];
+    ss << "   ";
+
+    ss << "data: ";
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+
+      pair<int, int> range = _backward_data_range[cur_blob->data().get()];
+      ss << cur_blob->data().get() << "(" << range.first << "," << range.second << ")  ";
+    }
+
+    ss << "diff: ";
+    for (int id = 0; id < top_vecs_[i].size(); ++id) {
+      caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+
+      pair<int, int> range = _backward_diff_range[cur_blob->diff().get()];
+      ss << cur_blob->diff().get() << "(" << range.first << "," << range.second << ")  ";
+    }
+
+    LOG(INFO) << "[LMS] " << layer_names_[i] << " " << layer_type << " _backward [" << i << "] " << ss.str();
+  }
+}
+
 
 template <typename Dtype>
 void Net<Dtype>::FilterNet(const NetParameter& param,
@@ -517,6 +723,8 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   CHECK_GE(start, 0);
   CHECK_LT(end, layers_.size());
   Dtype loss = 0;
+  bool lms_on = FLAGS_lms >= 0;
+
   for (int i = start; i <= end; ++i) {
     for (int c = 0; c < before_forward_.size(); ++c) {
       before_forward_[c]->run(i);
@@ -526,6 +734,16 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     if (debug_info_) { ForwardDebugInfo(i); }
     for (int c = 0; c < after_forward_.size(); ++c) {
       after_forward_[c]->run(i);
+    }
+
+    /////////////////////////////////////////////
+    //LMS migration
+    if (lms_on) {
+      bool keep = _lms_layer_flag[i] || i == end;
+      for (int id = 0; (!keep) && id < bottom_vecs_[i].size(); ++id) {
+        caffe::Blob<Dtype>* cur_blob = bottom_vecs_[i][id];
+        cur_blob->data()->push_to_cpu(false);
+      }
     }
   }
   return loss;
@@ -567,14 +785,40 @@ template <typename Dtype>
 void Net<Dtype>::BackwardFromTo(int start, int end) {
   CHECK_GE(end, 0);
   CHECK_LT(start, layers_.size());
+  bool lms_on = FLAGS_lms >= 0;
+
   for (int i = start; i >= end; --i) {
     for (int c = 0; c < before_backward_.size(); ++c) {
       before_backward_[c]->run(i);
     }
     if (layer_need_backward_[i]) {
       layers_[i]->Backward(
-          top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+        top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
       if (debug_info_) { BackwardDebugInfo(i); }
+
+      /////////////////////////////////////////////
+      //LMS migration
+      if (lms_on) {
+        bool keep = _lms_layer_flag[i];
+        for (int id = 0; (!keep) && id < top_vecs_[i].size(); ++id) {
+          caffe::Blob<Dtype>* cur_blob = top_vecs_[i][id];
+
+          pair<int, int> range_data = _backward_data_range[cur_blob->data().get()];
+          cur_blob->data()->push_to_cpu(range_data.first == i && _discard_mem[cur_blob->data().get()]);
+
+
+          pair<int, int> range_diff = _backward_diff_range[cur_blob->diff().get()];
+          cur_blob->diff()->push_to_cpu(range_diff.first == i&& _discard_mem[cur_blob->diff().get()]);
+
+          DLOG_IF(INFO, range_data.first == i && _discard_mem[cur_blob->data().get()])
+            << " discard data" << cur_blob->data().get()
+            << " i=" << i;
+
+          DLOG_IF(INFO, range_diff.first == i && _discard_mem[cur_blob->diff().get()])
+            << " discard diff " << cur_blob->diff().get()
+            << " i=" << i;
+        }
+      }
     }
     for (int c = 0; c < after_backward_.size(); ++c) {
       after_backward_[c]->run(i);

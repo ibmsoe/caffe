@@ -253,6 +253,16 @@ class Net {
   }
 
  protected:
+   //LMS
+   //variable for memory lifespan
+   map<void*, pair<int, int> > _forward_data_range;
+   map<void*, pair<int, int> > _backward_data_range;
+   map<void*, pair<int, int> > _backward_diff_range;
+   vector<int> _lms_layer_flag;
+   map<void*, bool> _discard_mem;
+   //to build LMS-related data structure
+   void BuildLargeModelSupport();
+
   // Helpers for Init.
   /// @brief Append a new top blob to the net.
   void AppendTop(const NetParameter& param, const int layer_id,
