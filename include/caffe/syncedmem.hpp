@@ -16,9 +16,11 @@ namespace caffe {
 // The improvement in performance seems negligible in the single GPU case,
 // but might be more significant for parallel training. Most importantly,
 // it improved stability for large models on many GPUs.
-inline void CaffeMallocHost(void** ptr, size_t size, bool* use_cuda) {
+inline void CaffeMallocHost(void** ptr, size_t size, bool* use_cuda,
+                            int* alloc_device) {
 #ifndef CPU_ONLY
   if (Caffe::mode() == Caffe::GPU) {
+    CUDA_CHECK(cudaGetDevice(alloc_device));
     CUDA_CHECK(cudaMallocHost(ptr, size));
     *use_cuda = true;
     return;
@@ -33,10 +35,15 @@ inline void CaffeMallocHost(void** ptr, size_t size, bool* use_cuda) {
   CHECK(*ptr) << "host allocation of size " << size << " failed";
 }
 
-inline void CaffeFreeHost(void* ptr, bool use_cuda) {
+inline void CaffeFreeHost(void* ptr, bool use_cuda, int alloc_device) {
 #ifndef CPU_ONLY
   if (use_cuda) {
+    int initial_device;
+    cudaGetDevice(&initial_device);
+    if (alloc_device != -1)
+        CUDA_CHECK(cudaSetDevice(alloc_device));
     CUDA_CHECK(cudaFreeHost(ptr));
+    cudaSetDevice(initial_device);
     return;
   }
 #endif
@@ -73,7 +80,15 @@ class SyncedMemory {
   void async_gpu_push(const cudaStream_t& stream);
 #endif
 
+  void push_to_cpu(bool discard); //LMS push to cpu
+
  private:
+   //LMS state variables and cache functions
+   bool _join;
+   cudaStream_t _cache_stream;
+   void* get_cache();
+   void* free_cache();
+
   void check_device();
 
   void to_cpu();
@@ -87,6 +102,8 @@ class SyncedMemory {
   bool own_gpu_data_;
   int device_;
 
+  // device used when cpu_ptr_ is allocated
+  int  alloc_device_;
   DISABLE_COPY_AND_ASSIGN(SyncedMemory);
 };  // class SyncedMemory
 
