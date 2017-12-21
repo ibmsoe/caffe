@@ -20,6 +20,9 @@ Since processing a layer needs to wait for all the needed blobs to be fetched to
 
 Considering that the link speed between CPU and GPU will improve (e.g., NVLink2), the performance penalty from LMS is expected to desecrate over the time.
 
+## Parameter Tuning Guideline
+Start with -lms 1000 -lms_frac 0.0. If this causes OOM, it means the minimum working memory need is larger than the GPU memory, thus much can be done. Otherwise, try to increase -lms first as much as you can, then -lms_frac gradually, utill you cannot change either and have maxed out GPU memory (15.5GB). For example, -lms 2000 -lms_frac 0.0, -lms 100000 -lms_frac 0.1, and so on.
+
 
 # Caffe
 
